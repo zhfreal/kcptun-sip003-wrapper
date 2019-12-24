@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
@@ -59,6 +59,7 @@ execute() {
         local bn="`basename "$0"`"
         bn="${bn%.*}"
 
+        # looking in current directory
         for type in client server; do
             for name in "${bn}_$type" "${bn}-$type" "${type}_${os}_$arch"; do
                 bin="$cwd/$name$suffix"
@@ -70,11 +71,16 @@ execute() {
             fi
         done
 
+        # looking in $PATH with command "command"
         for type in client server; do
-            for name in "${bn}_$type" "${bn}-$type"; do
+            for name in "${bn}_$type" "${bn}-$type" "${type}_${os}_$arch"; do
                 bin=`command -v "$name" || true`
                 if [[ -n "$bin" ]]; then return; fi
             done
+	   if [[ "$arch" == "amd64" ]]; then
+                bin=$(command -v ${type}_${os}_386$suffix)
+                if [[ -n "$bin" ]]; then return; fi
+           fi
         done
 
         local offset=0 last=0 pth="$PATH" ch
