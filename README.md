@@ -13,3 +13,6 @@ shadowsocks SIP003 wrapper for [xtaci/kcptun](https://github.com/xtaci/kcptun/re
    - $PATH/kcptun-client$suffix
    - $PATH/kcptun_server$suffix
    - $PATH/kcptun-server$suffix
+
+   ##### $suffix: in windows means .exe; in unix-like os means null/None/Empty String
+  
