@@ -77,7 +77,7 @@ execute() {
                 bin=`command -v "$name" || true`
                 if [[ -n "$bin" ]]; then return; fi
             done
-	    if [[ "$arch" == "amd64" ]]; then
+        if [[ "$arch" == "amd64" ]]; then
                 bin=$(command -v ${type}_${os}_386$suffix)
                 if [[ -n "$bin" ]]; then return; fi
             fi
