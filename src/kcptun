@@ -17,13 +17,70 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 #
-# If you have suggestions or find some bug of this script, please create an issue on this page
-# https://github.com/zhanhb/kcptun-sip003-wrapper/issues
 set -e
-
 child_pid=
 
-func_trap() {
+# regex rull from syzdek @github
+RE_IPV4="((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])"
+RE_IPV6="([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|"                    # TEST: 1:2:3:4:5:6:7:8
+RE_IPV6="${RE_IPV6}([0-9a-fA-F]{1,4}:){1,7}:|"                         # TEST: 1::                              1:2:3:4:5:6:7::
+RE_IPV6="${RE_IPV6}([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|"         # TEST: 1::8             1:2:3:4:5:6::8  1:2:3:4:5:6::8
+RE_IPV6="${RE_IPV6}([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|"  # TEST: 1::7:8           1:2:3:4:5::7:8  1:2:3:4:5::8
+RE_IPV6="${RE_IPV6}([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|"  # TEST: 1::6:7:8         1:2:3:4::6:7:8  1:2:3:4::8
+RE_IPV6="${RE_IPV6}([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|"  # TEST: 1::5:6:7:8       1:2:3::5:6:7:8  1:2:3::8
+RE_IPV6="${RE_IPV6}([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|"  # TEST: 1::4:5:6:7:8     1:2::4:5:6:7:8  1:2::8
+RE_IPV6="${RE_IPV6}[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|"       # TEST: 1::3:4:5:6:7:8   1::3:4:5:6:7:8  1::8
+RE_IPV6="${RE_IPV6}:((:[0-9a-fA-F]{1,4}){1,7}|:)|"                     # TEST: ::2:3:4:5:6:7:8  ::2:3:4:5:6:7:8 ::8       ::
+RE_IPV6="${RE_IPV6}fe08:(:[0-9a-fA-F]{1,4}){2,2}%[0-9a-zA-Z]{1,}|"     # TEST: fe08::7:8%eth0      fe08::7:8%1                                      (link-local IPv6 addresses with zone index)
+RE_IPV6="${RE_IPV6}::(ffff(:0{1,4}){0,1}:){0,1}${RE_IPV4}|"            # TEST: ::255.255.255.255   ::ffff:255.255.255.255  ::ffff:0:255.255.255.255 (IPv4-mapped IPv6 addresses and IPv4-translated addresses)
+RE_IPV6="${RE_IPV6}([0-9a-fA-F]{1,4}:){1,4}:${RE_IPV4}"                # TEST: 2001:db8:3:4::192.0.2.33  64:ff9b::192.0.2.33
+
+#RE_POSITIVE_NUMBER="^[0-9]$|^[1-9][0-9]+$"
+RE_POSITIVE_NUMBER="^[0-9]+$"
+RE_FLOAT_NUMBER="^[+-]?[0-9]+([.][0-9]+)?$"
+
+PROTO_IPV4="v4"
+PROTO_IPV6="v6"
+TYPE_SERVICE_CLIENT="client"
+TYPE_SERVICE_SERVER="server"
+
+CRYPT_ALG_AES_256="aes-256"
+RE_SUPPORTED_CRYPT_ALG="^aes-256$|^aes$|^aes-128$|^aes-192$|^salsa20$|^blowfish$|^twofish$|^cast5$|^3des$|^tea$|^xtea$|^xor$|^sm4$|^none$"
+RE_SUPPORTED_MODE="^fast3$|^fast2$|^fast$|^normal$|^manual$"
+
+# DSCP valid Codepoints:
+#   DSCP Pool 1 Codepoints:
+#          Name            Value(Binary)    Value(Decimal)    Reference
+#          CS0             0                0                 [RFC2474]
+#          CS1             1000             8                 [RFC2474]
+#          CS2             10000            16                [RFC2474]
+#          CS3             11000            24                [RFC2474]
+#          CS4             100000           32                [RFC2474]
+#          CS5             101000           40                [RFC2474]
+#          CS6             110000           48                [RFC2474]
+#          CS7             111000           56                [RFC2474]
+#          AF11            1010             10                [RFC2597]
+#          AF12            1100             12                [RFC2597]
+#          AF13            1110             14                [RFC2597]
+#          AF21            10010            18                [RFC2597]
+#          AF22            10100            20                [RFC2597]
+#          AF23            10110            22                [RFC2597]
+#          AF31            11010            26                [RFC2597]
+#          AF32            11100            28                [RFC2597]
+#          AF33            11110            30                [RFC2597]
+#          AF41            100010           34                [RFC2597]
+#          AF42            100100           36                [RFC2597]
+#          AF43            100110           38                [RFC2597]
+#          EF              101110           46                [RFC3246]
+#          VOICE-ADMIT     101100           44                [RFC5865]
+#
+#    DSCP Pool 3 Codepoints:
+#          Name     Value(Binary) 	Value(Decimal) 	Reference
+#          LE       000001          1               [RFC8622]
+
+RE_DSCP_CODE="^[018]$|^[1-3][02468]$|^4[0468]$|^56$"
+
+kill_kcp() {
     local signal="$1"
     # we can't kill background child process with signal INT
     if [[ "$signal" == INT ]]; then signal=TERM; fi
@@ -41,174 +98,409 @@ trap_with_arg() {
     done
 }
 
-has_builtin() {
-    [[ "$(command -v "$1")" == "$1" ]]
+get_abs_filename() {
+  # $1 : relative filename
+  echo "$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
 }
 
-execute() {
-    local type bin key0 value0 key1 value1
+get_command() {
+    command -v "$1" > /dev/null && get_abs_filename $(command -v "$1") && return 0
+    return 1
+}
 
-    findBinary() {
-        local os=`uname -s | awk '{print tolower($0)}'`
-        local suffix dir name
-        case "$os" in
-            MINGW*|CYGWIN*|mingw*|cygwin*) os=windows; suffix=".exe";;
+has_command(){
+    command -v "$1" > /dev/null
+}
+
+exit_unsupported_os(){
+    echo "don't support on this platform: $@" >&2
+    exit 1
+}
+exit_unsupported_opts(){
+    echo "don't support these parameters: $@" >&2
+    exit 1
+}
+exit_internal_errors(){
+    echo "errors occured: $@" >&2
+    exit 1
+}
+exit_unsupported_service_type(){
+    echo -e "can't detect use \"$TYPE_SERVICE_CLIENT\" or \"$TYPE_SERVICE_SERVER\" mode" >&2
+    echo -e "please make linker to \"$0\"," >&2
+    echo -e "\te.g. \"$0.$TYPE_SERVICE_CLIENT\" or \"$0_$TYPE_SERVICE_CLIENT\" or \"$0-$TYPE_SERVICE_CLIENT\"" >&2
+    echo -e "\te.g. \"$0.$TYPE_SERVICE_SERVER\" or \"$0_$TYPE_SERVICE_SERVER\" or \"$0-$TYPE_SERVICE_SERVER\"" >&2
+    echo -e "or just spcific mode in plugin parameters," >&2
+    echo -e "\te.g. \"$TYPE_SERVICE_CLIENT;dscp=0;parityshard=1...\"" >&2
+    echo -e "\te.g. \"$TYPE_SERVICE_SERVER;dscp=0;parityshard=1...\"" >&2
+    exit 1
+}
+exit_invalid_ip_port(){
+    echo "invalid ip address or port number" $@
+    exit 1
+}
+get_upper_string(){
+    echo "$1" | tr '[a-z]' '[A-Z]'
+}
+get_lower_string(){
+    echo "$1" | tr '[A-Z]' '[a-z]'
+}
+check_positive_number(){
+    echo "$1" | grep -Eq "$RE_POSITIVE_NUMBER" && return 0
+    return 1
+}
+check_dscp_code(){
+    echo "$1" | grep -Eq "$RE_DSCP_CODE" && return 0
+    return 1
+}
+check_float_number(){
+    echo "$1" | grep -Eq "$RE_FLOAT_NUMBER" && return 0
+    return 1
+}
+check_service_type(){
+    local service_type=$(get_lower_string $1)
+    if ! [ "$service_type" == "$TYPE_SERVICE_CLIENT" -o "$service_type" == "$TYPE_SERVICE_SERVER" ]; then
+        return 1
+    fi
+    return 0
+}
+check_ip_addr(){
+    ### $1 ipv4/ipv6 address, check if it is valid
+    ### if $1 is valid and it is a ipv4 address, return 0, print PROTO_IPV4-"v4" to STDOUT
+    ### if $1 is valid and it is a ipv6 address, return 0, print PROTO_IPV6-"v6" to STDOUT
+    ### if $1 is invalid, exit 1
+    if [ -z "$1" ]; then
+        return 1
+    fi
+    if echo "$1" | grep -Eq "^($RE_IPV4)$"; then
+        echo "$PROTO_IPV4"
+        return 0
+    elif echo "$1" | grep -E "^($RE_IPV6)$"; then
+        echo "$PROTO_IPV6"
+        return 0
+    else
+        return 1
+    fi
+}
+check_port(){
+    ### $1 present port, valid port should in [0, 65535]
+    ### if $1 is valid return 0, otherwise exit 1
+    # 1, it's not positive number, invalid
+    check_positive_number $1 || return 1
+    # 2, not in [0, 65535], invalid
+    [ $1 -gt 65535 ] && return 1
+    return 0
+}
+get_bind_host_port(){
+    ### $1 ip address, $2 port
+    ### print $1:$2 if $1 is ipv4 address and $1,$2 is valid to STDOUT;
+    ### print [$1]:$2 if $1 is ipv6 address and $1,$2 is valid to STDOUT
+    ### if $1 or $2 is invalid, exit 1
+    if ! [ $# -eq 2 ]; then
+        return 1
+    fi
+    local t_host="$1"
+    local t_port="$2"
+    local ip_addr_type=$(check_ip_addr "$t_host" || return 1)
+
+    # check port
+    check_port "$t_port" || return 1
+    if [ "$ip_addr_type"x == "$PROTO_IPV4"x ]; then
+        echo "$t_host:$t_port"
+        return 0
+    elif [ "$ip_addr_type"x == "$PROTO_IPV6"x ]; then
+        echo "[$t_host]:$t_port"
+        return 0
+    else
+        return 0
+    fi
+}
+get_binary() {
+    # the first parameter is service type [$TYPE_SERVICE_CLIENT|$TYPE_SERVICE_SERVER]
+    local service_type=$(get_lower_string $1)
+    check_service_type $service_type || exit_unsupported_service_type
+    local os=$(get_lower_string $(uname -s))
+    local suffix dir name
+    case "$os" in
+        MINGW*|CYGWIN*|mingw*|cygwin*) os=windows; suffix=".exe";;
+    esac
+    # support mingw, cygwin, linux, darwin, freebsd only
+    echo "$os" | grep -Eq "^linux$|^windows$|^darwin$|^freebsd$" || \
+        exit_unsupported_os $os
+
+    local arch=$(get_lower_string $(uname -m))
+
+    case "$arch" in
+        # x86-64, x86_64, amd64, x64
+        x86[-_]64|amd64|x64)
+            arch="amd64"
+            ;;
+        # x86, i386, i486, i586, i686
+        i[3-6]86|x86)
+            arch="386"
+            ;;
+        # armv8, arm64, aarch64
+        arm64|aarch64|armv8*)
+            arch="arm64"
+            ;;
+        # armv7
+        arm7*)
+            arch="arm7"
+            ;;
+        # armv6
+        arm6*)
+            arch="arm6"
+            ;;
+        # armv5
+        arm5*)
+            arch="arm5"
+            ;;
+        # mips
+        mips)
+            arch="mips"
+            ;;
+        # mipsel
+        mipsel)
+            arch="mipsel"
+            ;;
+        # exit when no supported arch
+        *)
+            exit_unsupported_os $os $arch
+    esac
+
+    # on freebsd , only amd64 supported
+    # on darwin  , only amd64 supported
+    if echo "$os" | grep -Eq "^freebsd$|^darwin$" \
+        && ! [ "$arch" == "amd64" ]; then
+        exit_unsupported_os $os $arch
+    fi
+
+    # arm only support on linux
+    # mips, mipsel only support on linux
+    if echo "$arch" | grep -Eq "^arm|^mips$|^mipsel$"; then
+        if ! [ "$os" == "linux" ]; then
+            exit_unsupported_os $os $arch
+        fi
+    fi
+
+    local cwd=$(pwd)
+    local bn=$(basename "$0")
+    bn="${bn%.*}"
+    local script_dir=$(dirname "$0")
+
+
+    # set binary file name in array
+    local bin_list=("${bn}_$service_type$suffix" "${bn}-$service_type$suffix" "${service_type}_${os}_$arch$suffix")
+    # set binary file name in array: find i386 when os is amd64, x86 binary should work well in x64 platform
+    if [ "$arch" == "amd64" ] && [ "$os" == "linux" -o "$os" == "windows" ]; then
+        bin_list=("${bin_list[@]}" "${service_type}_${os}_386$suffix")
+    fi
+    # set search directory in array: current work dir
+    local dir_list=("$cwd")
+    # set search directory in array: script dir
+    if ! [ "$cwd" == "$script_dir" ]; then
+        dir_list=("${dir_list[@]}" "$script_dir")
+    fi
+    # set search directory in array: linker dir if script is a soft linker
+    if [ -L "$0" ]; then
+        local real_file=$(readlink "$0")
+        local real_dir=$(dirname "$real_file")
+        if ! [ "$real_dir" == "$cwd" -o "$real_dir" == "$script_dir" ]; then
+            dir_list=("${dir_list[@]}" "$real_dir")
+        fi
+    fi
+    # find all binary file in binary file list
+    for t_bin in "${bin_list[@]}"; do
+        # find in system PATH
+        get_command "$t_bin" && return 0
+        # find in all dir list
+        for t_dir in "${dir_list[@]}"; do
+            get_command "$t_bin" && return 0
+        done
+    done
+    echo "no $bn $TYPE_SERVICE_CLIENT or $TYPE_SERVICE_SERVER found" >&2
+    exit 1
+}
+get_parameter(){
+    ### $1, service_type
+    ### $2, ss_local_host
+    ### $3, ss_local_port
+    ### $4, ss_remote_host
+    ### $5, ss_remote_port
+    ### $6, ss_plugin_options
+    if ! [ $# -eq 6 ]; then
+        exit_internal_errors $@
+    fi
+    local service_type ss_local_host ss_local_port ss_remote_host ss_remote_port ss_plugin_options
+    local plugin_parameters
+    service_type=$(get_lower_string "$1")
+    ss_local_host="$2"
+    ss_local_port="$3"
+    ss_remote_host="$4"
+    ss_remote_port="$5"
+    ss_plugin_options="$6"
+    check_service_type "$service_type" || exit_unsupported_service_type
+    check_ip_addr "$ss_local_host" > /dev/null || exit_invalid_ip_port 'get_parameter' "$ss_local_host"
+    check_port "$ss_local_port" || exit_invalid_ip_port 'get_parameter' "$ss_local_port"
+    check_port "$ss_remote_port" || exit_invalid_ip_port 'get_parameter' "$ss_remote_port"
+    if [ "$service_type" == "$TYPE_SERVICE_CLIENT" ]; then
+        check_ip_addr "$ss_remote_host" > /dev/null || exit_invalid_ip_port 'get_parameter' "$ss_remote_host"
+        plugin_parameters="--localaddr $(get_bind_host_port $ss_local_host $ss_local_port)"
+        plugin_parameters="$plugin_parameters --remoteaddr $(get_bind_host_port $ss_remote_host $ss_remote_port)"
+    elif [ "$service_type" == "$TYPE_SERVICE_SERVER" ]; then
+        # kcptun server listen to all ip in port $ss_remote_port, while there is "|" in $ss_remote_host
+        # in this condition, there are more than one ip to listen, so we listen all to simplised
+        if echo "$ss_remote_host" | grep -q "|"; then
+            plugin_parameters="--listen :$ss_remote_port"
+        # no "|" in $ss_remote_host, there is one ip addr to listen
+        else
+            check_ip_addr "$ss_remote_host" > /dev/null || exit_invalid_ip_port 'get_parameter' "$ss_remote_host"
+            plugin_parameters="--listen $(get_bind_host_port $ss_remote_host $ss_remote_port)"
+        fi
+        plugin_parameters="$plugin_parameters --target $(get_bind_host_port $ss_local_host $ss_local_port)"
+    else
+        exit_unsupported_service_type
+    fi
+    local t_para t_plugin_parameters
+    local t_key t_value
+    t_plugin_parameters="$ss_plugin_options"
+    while [ -n  "$t_plugin_parameters" ]; do
+        ## echo "$t_plugin_parameters"
+        t_para="${t_plugin_parameters%%;*}"
+        [ -z "$t_para" ] && break
+        if [ "$t_para" == "$t_plugin_parameters" ]; then
+            t_plugin_parameters=
+        else
+            t_plugin_parameters="${t_plugin_parameters#*;}"
+        fi
+        t_key="${t_para%%=*}"
+        t_key=$(get_lower_string "$t_key")
+        t_value="${t_para#*=}"
+        case "$t_key" in
+            key)
+                [ -z "$t_value" ] && exit_unsupported_opts 'get_parameter' "--$t_key has no value" "$ss_plugin_options"
+                plugin_parameters="$plugin_parameters --$t_key $t_value"
+                ;;
+            crypt)
+                [ -z "$t_value" ] && exit_unsupported_opts 'get_parameter' "--$t_key has no value" "$ss_plugin_options"
+                t_value=$(get_lower_string "$t_value")
+                echo "$t_value" | grep -Eq "$RE_SUPPORTED_CRYPT_ALG" || \
+                    exit_unsupported_opts 'get_parameter' "--$t_key $t_value unsupported crypt method"
+                # tranlate aes-256 to aes
+                [ "$t_value" == "$CRYPT_ALG_AES_256" ] && t_value="aes"
+                plugin_parameters="$plugin_parameters --$t_key $t_value"
+                ;;
+            mode)
+                [ -z "$t_value" ] && exit_unsupported_opts 'get_parameter' "--$t_key has no value" "$ss_plugin_options"
+                t_value=$(get_lower_string "$t_value")
+                echo "$t_value" | grep -Eq "$RE_SUPPORTED_MODE" || \
+                    exit_unsupported_opts 'get_parameter' "--$t_key $t_value unsupported mode"
+                plugin_parameters="$plugin_parameters --$t_key $t_value"
+                ;;
+            mtu|sndwnd|rcvwnd|datashard|parityshard|sockbuf|smuxbuf|streambuf|keepalive)
+                check_positive_number "$t_value" || \
+                    exit_unsupported_opts 'get_parameter' "--$t_key $t_value is invalid"
+                plugin_parameters="$plugin_parameters --$t_key $t_value"
+                ;;
+            conn|autoexpire)
+                # for client only
+                [ "$service_type" == "$TYPE_SERVICE_CLIENT" ] || continue
+                check_positive_number "$t_value" || \
+                    exit_unsupported_opts 'get_parameter' "--$t_key $t_value is invalid"
+                plugin_parameters="$plugin_parameters --$t_key $t_value"
+                ;;
+            scavengettl)
+                # for client only
+                # --scavengettl value
+                #        set how long an expired connection can live(in sec),
+                #        -1 to disable (default: 600)
+                [ "$service_type" == "$TYPE_SERVICE_CLIENT" ] || continue
+                check_positive_number "$t_value" || [ "$t_value" == "-1" ] || \
+                    exit_unsupported_opts 'get_parameter' "--$t_key $t_value is invalid"
+                plugin_parameters="$plugin_parameters --$t_key $t_value"
+                ;;
+            dscp)
+                check_dscp_code "$t_value" || \
+                    exit_unsupported_opts 'get_parameter' "--$t_key $t_value is invalid"
+                plugin_parameters="$plugin_parameters --$t_key $t_value"
+                ;;
+            nocomp|quiet|tcp)
+                plugin_parameters="$plugin_parameters --$t_key"
+                ;;
+            smuxver)
+                # smux version 1 and 2 is supported currently
+                echo "$t_value" | grep -Eq "^[12]$" || \
+                    exit_unsupported_opts 'get_parameter' "--$t_key $t_value is invalid"
+                plugin_parameters="$plugin_parameters --$t_key $t_value"
+                ;;
+             *)
+             ;;
         esac
-        local arch=`uname -m | sed -e 's/^[Ii][3-6]86$/386/;s/^[Xx]86$/386/;s/^[Xx]\(86[-_]\)\{0,1\}64$/amd64/;s/^[Aa][Mm][Dd]64$/amd64/'`
-        local cwd="`pwd`"
-        local bn="`basename "$0"`"
-        bn="${bn%.*}"
-
-        # looking in current directory
-        for type in client server; do
-            for name in "${bn}_$type" "${bn}-$type" "${type}_${os}_$arch"; do
-                bin="$cwd/$name$suffix"
-                if [[ -f "$bin" ]] && [[ -x "$bin" ]]; then return; fi
-            done
-            if [[ "$arch" == "amd64" ]]; then
-                bin="$cwd/${type}_${os}_386$suffix"
-                if [[ -f "$bin" ]] && [[ -x "$bin" ]]; then return; fi
-            fi
-        done
-
-        # looking in $PATH with command "command"
-        for type in client server; do
-            for name in "${bn}_$type" "${bn}-$type" "${type}_${os}_$arch"; do
-                bin=`command -v "$name" || true`
-                if [[ -n "$bin" ]]; then return; fi
-            done
-            if [[ "$arch" == "amd64" ]]; then
-                bin=$(command -v ${type}_${os}_386$suffix)
-                if [[ -n "$bin" ]]; then return; fi
-            fi
-        done
-
-        local offset=0 last=0 pth="$PATH" ch
-        while true; do
-            ch="${pth:$offset:1}"
-            if [[ -z "$ch" ]] || [[ "$ch" == ":" ]]; then
-                set -- "$@" "${pth:$last:$((offset-last))}"
-                last=$((offset+1))
-                if [[ -z "$ch" ]]; then break; fi
-            fi
-            offset=$((offset+1))
-        done
-
-        for type in client server; do
-            for name in "${bn}_$type" "${bn}-$type"; do
-                for dir in "$@"; do
-                    if [[ -n "$dir" ]]; then
-                        bin="$dir/$name$suffix"
-                        if [[ -f "$bin" ]] && [[ -x "$bin" ]]; then return; fi
-                    fi
-                done
-            done
-        done
-
-        echo "no $bn client or server found" >&2
-        exit 1
-    }
-
-    setHosts() {
-        setAddr() {
-            local value="$3:$4"
-            case "$3" in "["*) ;; *":"*) value="[$3]:$4";; esac
-            if [[ "$1" -eq 0 ]]; then
-                key0="--$2"
-                value0="$value"
-            else
-                key1="--$2"
-                value1="$value"
-            fi
-        }
-        if [[ "$type" == 'client' ]]; then
-            setAddr 0 localaddr "${1:-127.0.0.1}" "${2:-12948}"
-            setAddr 1 remoteaddr "${3:-vps}" "${4:-29900}"
-        else
-            setAddr 0 listen "$3" "${4:-29900}"
-            setAddr 1 target "${1:-127.0.0.1}" "${2:-12948}"
-        fi
-    }
-
-    parseAndExecute() {
-        local ch offset result
-
-        nextToken() {
-            result=
-            while true; do
-                offset=$((offset+1))
-                ch="${1:$offset:1}"
-                if [[ -z "$ch" ]]; then break; fi
-                if [[ "$ch" == "\\" ]]; then
-                    offset=$((offset+1))
-                    ch="${1:$offset:1}"
-                    if [[ -z "$ch" ]]; then
-                        echo "nothing following final escape in $1" >&2
-                        exit 1
-                    fi
-                else
-                    case "$2" in *"$ch"*) break;; esac
-                fi
-                result="$result$ch"
-            done
-        }
-
-        local opts="$SS_PLUGIN_OPTIONS"
-        if [[ -n "$opts" ]]; then
-            local len="$#"
-            offset=-1
-            while true; do
-                nextToken "$opts" "=;"
-                if [[ -z "$result" ]]; then
-                    echo "empty key in $opts" >&2
-                    exit 1
-                fi
-                set -- "$@" "--$result"
-                if [[ "$ch" == "=" ]]; then
-                    nextToken "$opts" ";"
-                    set -- "$@" "$result"
-                fi
-                if [[ -z "$ch" ]]; then break; fi
-            done
-
-            while [[ "$len" -gt 0 ]]; do
-                len=$((len-1))
-                set -- "$@" "$1"
-                shift
-            done
-        fi
-
-        unset SS_LOCAL_HOST SS_LOCAL_PORT SS_REMOTE_HOST SS_REMOTE_PORT SS_PLUGIN_OPTIONS
-        if has_builtin wait && has_builtin trap && has_builtin kill; then
-            "$bin" "$key0" "$value0" "$key1" "$value1" "$@" &
-            child_pid=$!
-            if [[ -z "$child_pid" ]]; then
-                echo Unknown error occur, cannot get process id of child process. >&2
-                exit 1
-            fi
-            # Send all signal to kcptun
-            trap_with_arg func_trap HUP INT QUIT ILL TRAP ABRT BUS FPE USR1 SEGV USR2 PIPE ALRM TERM
-            local wait_result=0
-            while true; do
-                local value=0
-                wait "$child_pid" 2>/dev/null || value=$?
-                # 127 means this pid is not child process of our shell.
-                if [[ "$value" == 127 ]]; then break; fi
-                wait_result="$value"
-                if [[ "$value" == 0 ]]; then break; fi
-                # yield control of the CPU 
-                sleep 0.1 || sleep 1
-            done
-            child_pid=
-            return $wait_result
-        else
-            "$bin" "$key0" "$value0" "$key1" "$value1" "$@"
-        fi
-    }
-
-    findBinary
-    setHosts "$SS_LOCAL_HOST" "$SS_LOCAL_PORT" "$SS_REMOTE_HOST" "$SS_REMOTE_PORT"
-    parseAndExecute "$@"
+    done
+    echo "$plugin_parameters"
 }
+get_service_type(){
+    ### $1 $SS_PLUGIN_OPTIONS,
+    ### 1. check this script file name, if script file like:
+    ###     1) ***.client or ***_client or ***-client, then this is kcptun client side,
+    ###     2) ***.server or ***_server or ***-client, then this is kcptun server side,
+    case $0 in
+        *.$TYPE_SERVICE_CLIENT|*_$TYPE_SERVICE_CLIENT|*-$TYPE_SERVICE_CLIENT)
+            echo "$TYPE_SERVICE_CLIENT"
+            return 0
+            ;;
+        *.$TYPE_SERVICE_SERVER|*_$TYPE_SERVICE_SERVER|*-$TYPE_SERVICE_SERVER)
+            echo "$TYPE_SERVICE_SERVER"
+            return 0
+            ;;
+        *)
+            ;;
+    esac
+    ### 2. check "client" or "server" set in plugin options from shadowsocks
+    ###     1) if "client" in plugin options like: "client;dscp=0;parityshard=1;...", then this is kcptun client side
+    ###     2) if "server" in plugin options like: "server;dscp=0;parityshard=1;...", then this is kcptun server side
+    ### just put string "client" or "server" in shadowsocks plugin options
+    if echo "$1" | grep -Eq "^TYPE_SERVICE_CLIENT;|;TYPE_SERVICE_CLIENT;|;TYPE_SERVICE_CLIENT(;)?$"; then
+        echo "$TYPE_SERVICE_CLIENT"
+        return 0
+    elif echo "$1" | grep -Eq "^TYPE_SERVICE_SERVER;|;TYPE_SERVICE_SERVER;|;TYPE_SERVICE_SERVER(;)?$"; then
+        echo "$TYPE_SERVICE_SERVER"
+        return 0
+    fi
+    return 1
+}
+t_ss_local_host="$SS_LOCAL_HOST"
+t_ss_local_port="$SS_LOCAL_PORT"
+t_ss_remote_host="$SS_REMOTE_HOST"
+t_ss_remote_port="$SS_REMOTE_PORT"
+t_ss_plugin_options="$SS_PLUGIN_OPTIONS"
+unset SS_LOCAL_HOST SS_LOCAL_PORT SS_REMOTE_HOST SS_REMOTE_PORT SS_PLUGIN_OPTIONS
+t_service_type=$(get_service_type $t_ss_plugin_options  || exit_unsupported_service_type)
+bin=$(get_binary $t_service_type)
+plugin_para=$(get_parameter "$t_service_type" "$t_ss_local_host" "$t_ss_local_port" "$t_ss_remote_host" "$t_ss_remote_port" "$t_ss_plugin_options")
 
-execute "$@"
+
+if has_command wait && has_command trap && has_command kill; then
+    $bin $plugin_para &
+    child_pid=$!
+    if [[ -z "$child_pid" ]]; then
+        echo Unknown error occur, cannot get process id of child process. >&2
+        exit 1
+    fi
+    # Send all signal to kcptun
+    trap_with_arg kill_kcp HUP INT QUIT ILL TRAP ABRT BUS FPE USR1 SEGV USR2 PIPE ALRM TERM
+    wait_result=0
+    while true; do
+        value=0
+        wait "$child_pid" 2>/dev/null || value=$?
+        # 127 means this pid is not child process of our shell.
+        if [[ "$value" == 127 ]]; then break; fi
+        wait_result="$value"
+        if [[ "$value" == 0 ]]; then break; fi
+        # yield control of the CPU
+        sleep 0.1 || sleep 1
+    done
+    child_pid=
+    return $wait_result
+else
+    "$bin" $plugin_para
+fi
