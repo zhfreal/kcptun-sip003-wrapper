@@ -24,9 +24,11 @@ It's a bash script and will check all parameters from shadowsocks according the 
 e.g.
 server side:
 <p><code>ss-server --plugin "YOUR_LOCATION_OF_THIS_SCRIPT/kcptun" --plugin-opts "server;key=xxxx;crypt=xxxx;...." --ANY_OTHER_PAREMETERS</code></p>
+or
 <p><code>ln -s kcptun kcptun.server</code></p>
 <p><code>ss-server --plugin "YOUR_LOCATION_OF_THIS_SCRIPT/kcptun.server" --plugin-opts "key=xxxx;crypt=xxxx;...." --ANY_OTHER_PAREMETERS</code></p>
 client side:
 <p><code>ss-local --plugin "YOUR_LOCATION_OF_THIS_SCRIPT/kcptun" --plugin-opts "client;key=xxxx;crypt=xxxx;...." --ANY_OTHER_PAREMETERS</code></p>
+or
 <p><code>ln -s kcptun kcptun.client</code></p>
 <p><code>ss-local --plugin "YOUR_LOCATION_OF_THIS_SCRIPT/kcptun.client" --plugin-opts "key=xxxx;crypt=xxxx;...." --ANY_OTHER_PAREMETERS</code></p>
