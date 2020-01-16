@@ -23,10 +23,10 @@ It's a bash script and will check all parameters from shadowsocks according the 
 
 e.g.
 server side:
-ss-server --plugin "YOUR_LOCATION_OF_THIS_SCRIPT/kcptun" --plugin-opts "server;key=xxxx;crypt=xxxx;...." --ANY_OTHER_PAREMETERS
-##### ln -s kcptun kcptun.server
-ss-server --plugin "YOUR_LOCATION_OF_THIS_SCRIPT/kcptun.server" --plugin-opts "key=xxxx;crypt=xxxx;...." --ANY_OTHER_PAREMETERS
+<p><code>ss-server --plugin "YOUR_LOCATION_OF_THIS_SCRIPT/kcptun" --plugin-opts "server;key=xxxx;crypt=xxxx;...." --ANY_OTHER_PAREMETERS</code></p>
+<p><code>ln -s kcptun kcptun.server</code></p>
+<p><code>ss-server --plugin "YOUR_LOCATION_OF_THIS_SCRIPT/kcptun.server" --plugin-opts "key=xxxx;crypt=xxxx;...." --ANY_OTHER_PAREMETERS</code></p>
 client side:
-ss-local --plugin "YOUR_LOCATION_OF_THIS_SCRIPT/kcptun" --plugin-opts "client;key=xxxx;crypt=xxxx;...." --ANY_OTHER_PAREMETERS
-##### ln -s kcptun kcptun.client
-ss-local --plugin "YOUR_LOCATION_OF_THIS_SCRIPT/kcptun.client" --plugin-opts "key=xxxx;crypt=xxxx;...." --ANY_OTHER_PAREMETERS
+<p><code>ss-local --plugin "YOUR_LOCATION_OF_THIS_SCRIPT/kcptun" --plugin-opts "client;key=xxxx;crypt=xxxx;...." --ANY_OTHER_PAREMETERS</code></p>
+<p><code>ln -s kcptun kcptun.client</code></p>
+<p><code>ss-local --plugin "YOUR_LOCATION_OF_THIS_SCRIPT/kcptun.client" --plugin-opts "key=xxxx;crypt=xxxx;...." --ANY_OTHER_PAREMETERS</code></p>
