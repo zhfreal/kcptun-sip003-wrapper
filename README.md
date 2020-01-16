@@ -32,3 +32,5 @@ client side:
 or
 <p><code>ln -s kcptun kcptun.client</code></p>
 <p><code>ss-local --plugin "YOUR_LOCATION_OF_THIS_SCRIPT/kcptun.client" --plugin-opts "key=xxxx;crypt=xxxx;...." --ANY_OTHER_PAREMETERS</code></p>
+
+You will find more details and features in this scripts.
